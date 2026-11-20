@@ -67,6 +67,7 @@ export async function generateStudyPlan(payload: {
     missedConcepts: string[];
     skipped: boolean;
   }>;
+  sessionTracks?: string[];
 }): Promise<{ studyPlan: StudyPlan }> {
   return postJson('/api/interview/study-plan', payload);
 }

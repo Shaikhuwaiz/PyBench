@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
   DomainAllocation,
   InterviewQuestion,
@@ -195,6 +195,7 @@ Rules:
         config: {
           systemInstruction:
             'You are a Principal Python and AI/ML Staff Interviewer designing high-signal technical written mock interviews. Be rigorous, practical, and specific to production engineering.',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -341,6 +342,7 @@ Scoring rules:
         config: {
           systemInstruction:
             'You are a calibrated Principal Technical Interviewer evaluating written engineering responses for Python and AI/ML roles. Never inflate scores for vague buzzwords; reward concrete mechanisms, accurate complexity/SQL/runtime semantics, and explicit tradeoffs.',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -449,6 +451,7 @@ Provide concise, direct feedback (2-3 sentences) on whether the candidate closed
         config: {
           systemInstruction:
             'You are a Principal Technical Interviewer giving crisp, calibrated feedback on a candidate follow-up answer.',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -486,65 +489,91 @@ export async function handleGenerateStudyPlan(
     return;
   }
   try {
-    const { roleTitle, skillLevel, jobDescription, performanceDigest } =
-      await readJsonBody<{
-        roleTitle: string;
-        skillLevel: SkillLevel;
-        jobDescription: string;
-        performanceDigest: Array<{
-          domain: string;
-          questionTitle: string;
-          score: number;
-          verdict: string;
-          gapsAndMistakes: string[];
-          missedConcepts: string[];
-          skipped: boolean;
-        }>;
-      }>(req);
+    const {
+      roleTitle,
+      skillLevel,
+      jobDescription,
+      performanceDigest,
+      sessionTracks,
+    } = await readJsonBody<{
+      roleTitle: string;
+      skillLevel: SkillLevel;
+      jobDescription: string;
+      performanceDigest: Array<{
+        domain: string;
+        questionTitle: string;
+        score: number;
+        verdict: string;
+        gapsAndMistakes: string[];
+        missedConcepts: string[];
+        skipped: boolean;
+      }>;
+      sessionTracks?: string[];
+    }>(req);
 
-    if (!Array.isArray(performanceDigest) || performanceDigest.length === 0) {
+    const hasDigest =
+      Array.isArray(performanceDigest) && performanceDigest.length > 0;
+    const hasContext =
+      Boolean(jobDescription && jobDescription.trim().length >= 20) ||
+      Boolean(roleTitle && roleTitle.trim().length > 0);
+
+    if (!hasDigest && !hasContext) {
       sendJson(res, 400, {
         error:
-          'At least one evaluated or attempted question is required to build a study plan.',
+          'Please configure a target role or evaluate at least one question before generating a study plan.',
       });
       return;
     }
 
     const ai = getGeminiClient();
 
-    const digestText = performanceDigest
-      .map(
-        (item, idx) =>
-          `${idx + 1}. [${item.domain}] ${item.questionTitle} — ${
-            item.skipped
-              ? 'SKIPPED (0/100)'
-              : `${item.score}/100 (${item.verdict})`
-          }\n   Missed concepts: ${
-            item.missedConcepts.join(', ') || 'None'
-          }\n   Gaps: ${item.gapsAndMistakes.join('; ') || 'None'}`
-      )
-      .join('\n\n');
+    const digestText = hasDigest
+      ? performanceDigest
+          .map(
+            (item, idx) =>
+              `${idx + 1}. [${item.domain}] ${item.questionTitle} — ${
+                item.skipped
+                  ? 'SKIPPED (0/100)'
+                  : `${item.score}/100 (${item.verdict})`
+              }\n   Missed concepts: ${
+                item.missedConcepts.join(', ') || 'None'
+              }\n   Gaps: ${item.gapsAndMistakes.join('; ') || 'None'}`
+          )
+          .join('\n\n')
+      : `No answers evaluated yet. Target interview tracks:\n${
+          Array.isArray(sessionTracks) && sessionTracks.length > 0
+            ? sessionTracks.map((t) => `- ${t}`).join('\n')
+            : '- Python Internals\n- FastAPI & Backend\n- RAG & LLM Evaluation\n- SQL & Data Modeling\n- DSA & Problem Solving'
+        }`;
 
-    const prompt = `Target Role: ${roleTitle}
+    const prompt = `Target Role: ${roleTitle || 'Python / AI-ML Engineer'}
 Candidate Skill Level: ${skillLevel}
 
 Job Description Context:
-${jobDescription.slice(0, 2000)}
+${(jobDescription || '').slice(0, 2000)}
 
-Mock Interview Performance Digest:
+${hasDigest ? 'Mock Interview Performance Digest:' : 'Baseline Preparation Context (Pre-Evaluation):'}
 ${digestText}
 
-Synthesize a systematic, prioritized Weak-Area Study Plan to close the candidate's exact gaps for this role.
+Synthesize a systematic, prioritized Study Plan ${
+      hasDigest
+        ? "to close the candidate's exact gaps for this role"
+        : 'to prepare the candidate for this target role and interview tracks'
+    }.
 Requirements:
-1. priorityWeakAreas: 3 to 5 ranked weak areas ordered from most critical to polish. Each must include:
+1. priorityWeakAreas: 3 to 5 ranked focus areas ordered from highest impact to polish. Each must include:
    - domain (one of the 5 standard tracks)
    - topic (specific subtopic, e.g. "AsyncIO Event Loop & Blocking I/O in FastAPI")
    - severity: "Critical", "Moderate", or "Polish"
-   - diagnosis: 1-2 sentences grounded in their actual interview performance
+   - diagnosis: 1-2 sentences grounded in ${
+     hasDigest
+       ? 'their actual interview performance'
+       : 'the job description and seniority expectations'
+   }
    - targetOutcome: concrete mastery bar to hit
    - drills: 2-3 hands-on exercises (coding, query profiling, eval harness build, or architecture writeup) with title, description, deliverable, and estimatedHours (0.5 to 3).
-2. weeklySchedule: a 7-day structured preparation schedule (Day 1 through Day 7) targeting the weakest areas first, ending with a verification re-test day. Each day has dayLabel, focusDomain, objective, practiceTask, verificationCheckpoint, and durationMinutes (45-120).
-3. commonMistakesToEliminate: 3-5 concrete habits or interview pitfalls observed across their answers.`;
+2. weeklySchedule: a 7-day structured preparation schedule (Day 1 through Day 7) targeting the highest-priority areas first, ending with a verification re-test day. Each day has dayLabel, focusDomain, objective, practiceTask, verificationCheckpoint, and durationMinutes (45-120).
+3. commonMistakesToEliminate: 3-5 concrete habits or interview pitfalls to avoid at the ${skillLevel} bar.`;
 
     const response = await callWithRetry(() =>
       ai.models.generateContent({
@@ -553,6 +582,7 @@ Requirements:
         config: {
           systemInstruction:
             'You are a Technical Interview Coach for Python and AI/ML engineers. Produce concrete, hands-on engineering drills—never generic advice like "read the docs" or "practice more LeetCode".',
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -639,18 +669,33 @@ Requirements:
 
     const parsed = JSON.parse((response.text ?? '{}').trim());
     const studyPlan = {
-      ...parsed,
+      readinessSummary:
+        typeof parsed.readinessSummary === 'string'
+          ? parsed.readinessSummary
+          : '',
+      estimatedPrepHours: Number(parsed.estimatedPrepHours) || 10,
       generatedAt: new Date().toISOString(),
-      priorityWeakAreas: (parsed.priorityWeakAreas || []).map(
+      priorityWeakAreas: (Array.isArray(parsed.priorityWeakAreas)
+        ? parsed.priorityWeakAreas
+        : []
+      ).map(
         (area: { drills?: Array<Record<string, unknown>> }, aIdx: number) => ({
           ...area,
           id: `wa-${aIdx + 1}-${Date.now()}`,
-          drills: (area.drills || []).map((drill, dIdx) => ({
-            ...drill,
-            id: `drill-${aIdx + 1}-${dIdx + 1}-${Date.now()}`,
-          })),
+          drills: (Array.isArray(area.drills) ? area.drills : []).map(
+            (drill, dIdx) => ({
+              ...drill,
+              id: `drill-${aIdx + 1}-${dIdx + 1}-${Date.now()}`,
+            })
+          ),
         })
       ),
+      weeklySchedule: Array.isArray(parsed.weeklySchedule)
+        ? parsed.weeklySchedule
+        : [],
+      commonMistakesToEliminate: Array.isArray(parsed.commonMistakesToEliminate)
+        ? parsed.commonMistakesToEliminate
+        : [],
     };
 
     sendJson(res, 200, { studyPlan });

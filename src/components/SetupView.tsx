@@ -464,25 +464,33 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
-                {sessions.map((session) => {
+                {sessions.map((session, idx) => {
+                  if (!session || typeof session !== 'object') return null;
                   const metrics = computeSessionMetrics(session);
                   const isCurrent = session.id === activeSessionId;
+                  const parsedDate = session.createdAt
+                    ? new Date(session.createdAt)
+                    : null;
+                  const dateLabel =
+                    parsedDate && !Number.isNaN(parsedDate.getTime())
+                      ? parsedDate.toLocaleDateString()
+                      : 'Saved session';
                   return (
                     <tr
-                      key={session.id}
+                      key={session.id || `session-${idx}`}
                       className="hover:bg-slate-50/80 transition-colors"
                     >
                       <td className="py-3.5 px-5">
                         <div className="font-medium text-slate-950">
-                          {session.roleTitle}
+                          {session.roleTitle || 'Python / AI-ML Engineer'}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">
-                          {new Date(session.createdAt).toLocaleDateString()}
+                          {dateLabel}
                           {isCurrent ? ' · Active' : ''}
                         </div>
                       </td>
                       <td className="py-3.5 px-4 text-slate-700 whitespace-nowrap">
-                        {session.skillLevel}
+                        {session.skillLevel || 'Mid-Level'}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
                         {metrics.evaluatedCount + metrics.skippedCount}/

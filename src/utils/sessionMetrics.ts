@@ -27,7 +27,15 @@ export interface SessionSummaryMetrics {
 }
 
 export function computeSessionMetrics(session: InterviewSession): SessionSummaryMetrics {
-  const targetBenchmark = TARGET_BENCHMARK_BY_LEVEL[session.skillLevel];
+  const targetBenchmark = TARGET_BENCHMARK_BY_LEVEL[session?.skillLevel] ?? 74;
+  const questions = Array.isArray(session?.questions) ? session.questions : [];
+  const attempts =
+    session?.attempts &&
+    typeof session.attempts === 'object' &&
+    !Array.isArray(session.attempts)
+      ? session.attempts
+      : {};
+
   let scoreSum = 0;
   let evaluatedCount = 0;
   let skippedCount = 0;
@@ -40,12 +48,16 @@ export function computeSessionMetrics(session: InterviewSession): SessionSummary
     domainMap.set(d, { questionCount: 0, scores: [] });
   }
 
-  for (const q of session.questions) {
-    const entry = domainMap.get(q.domain) || { questionCount: 0, scores: [] };
+  for (const q of questions) {
+    if (!q || typeof q !== 'object') continue;
+    const domain = ALL_DOMAINS.includes(q.domain) ? q.domain : 'Python Internals';
+    const entry = domainMap.get(domain) || { questionCount: 0, scores: [] };
     entry.questionCount += 1;
-    const attempt = session.attempts[q.id];
-    if (attempt?.evaluation) {
-      const bonus = attempt.followUp?.scoreDelta ?? 0;
+    const attempt = attempts[q.id];
+    if (attempt?.evaluation && Number.isFinite(attempt.evaluation.overallScore)) {
+      const bonus = Number.isFinite(attempt.followUp?.scoreDelta)
+        ? attempt.followUp!.scoreDelta
+        : 0;
       const effectiveScore = Math.max(
         0,
         Math.min(100, attempt.evaluation.overallScore + bonus)
@@ -57,7 +69,7 @@ export function computeSessionMetrics(session: InterviewSession): SessionSummary
       skippedCount += 1;
       entry.scores.push(0);
     }
-    domainMap.set(q.domain, entry);
+    domainMap.set(domain, entry);
   }
 
   const domainBreakdown: DomainPerformance[] = ALL_DOMAINS.map((domain) => {
@@ -92,7 +104,7 @@ export function computeSessionMetrics(session: InterviewSession): SessionSummary
     overallScore,
     evaluatedCount,
     skippedCount,
-    totalQuestions: session.questions.length,
+    totalQuestions: questions.length,
     domainBreakdown,
     strongestDomain:
       sortedAsc.length > 0 ? sortedAsc[sortedAsc.length - 1] : null,

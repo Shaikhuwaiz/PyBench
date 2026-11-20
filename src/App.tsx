@@ -4,22 +4,95 @@ import { SetupView } from './components/SetupView';
 import { InterviewView } from './components/InterviewView';
 import { EvaluationView } from './components/EvaluationView';
 import { StudyPlanView } from './components/StudyPlanView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   evaluateAnswer,
   evaluateFollowUp,
   generateInterview,
   generateStudyPlan,
 } from './services/interviewApi';
-import type {
-  DomainAllocation,
-  InterviewQuestion,
-  InterviewSession,
-  SkillLevel,
-  WorkspaceTab,
+import {
+  SKILL_LEVELS,
+  type DomainAllocation,
+  type InterviewQuestion,
+  type InterviewSession,
+  type SkillLevel,
+  type WorkspaceTab,
 } from './types/interview';
 
 const STORAGE_KEY = 'pybench_sessions_v1';
 const WELCOME_STORAGE_KEY = 'pybench_welcome_dismissed_v1';
+
+function sanitizeSession(raw: unknown): InterviewSession | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const s = raw as Record<string, unknown>;
+  if (s.isSample || s.id === 'sample-senior-aiml-session') return null;
+  if (typeof s.id !== 'string' || !s.id.trim()) return null;
+
+  const questions = Array.isArray(s.questions)
+    ? (s.questions.filter(
+        (q) => q && typeof q === 'object' && typeof (q as { id?: unknown }).id === 'string'
+      ) as InterviewQuestion[])
+    : [];
+
+  const attempts =
+    s.attempts && typeof s.attempts === 'object' && !Array.isArray(s.attempts)
+      ? (s.attempts as InterviewSession['attempts'])
+      : {};
+
+  const completedDrillIds = Array.isArray(s.completedDrillIds)
+    ? s.completedDrillIds.filter((id): id is string => typeof id === 'string')
+    : [];
+
+  const skillLevel =
+    typeof s.skillLevel === 'string' &&
+    SKILL_LEVELS.includes(s.skillLevel as SkillLevel)
+      ? (s.skillLevel as SkillLevel)
+      : 'Mid-Level';
+
+  const nowIso = new Date().toISOString();
+  const rawJd =
+    s.jdAnalysis && typeof s.jdAnalysis === 'object' && !Array.isArray(s.jdAnalysis)
+      ? (s.jdAnalysis as Record<string, unknown>)
+      : {};
+
+  return {
+    id: s.id,
+    createdAt: typeof s.createdAt === 'string' ? s.createdAt : nowIso,
+    updatedAt: typeof s.updatedAt === 'string' ? s.updatedAt : nowIso,
+    roleTitle:
+      typeof s.roleTitle === 'string' && s.roleTitle.trim()
+        ? s.roleTitle
+        : 'Python / AI-ML Engineer',
+    skillLevel,
+    jobDescription: typeof s.jobDescription === 'string' ? s.jobDescription : '',
+    jdAnalysis: {
+      extractedRole:
+        typeof rawJd.extractedRole === 'string'
+          ? rawJd.extractedRole
+          : 'Python / AI-ML Engineer',
+      senioritySignals: Array.isArray(rawJd.senioritySignals)
+        ? rawJd.senioritySignals.filter((x): x is string => typeof x === 'string')
+        : [],
+      coreTechnologies: Array.isArray(rawJd.coreTechnologies)
+        ? rawJd.coreTechnologies.filter((x): x is string => typeof x === 'string')
+        : [],
+      interviewEmphasis:
+        typeof rawJd.interviewEmphasis === 'string' ? rawJd.interviewEmphasis : '',
+    },
+    questions,
+    attempts,
+    elapsedSeconds:
+      typeof s.elapsedSeconds === 'number' && Number.isFinite(s.elapsedSeconds)
+        ? Math.max(0, s.elapsedSeconds)
+        : 0,
+    studyPlan:
+      s.studyPlan && typeof s.studyPlan === 'object' && !Array.isArray(s.studyPlan)
+        ? (s.studyPlan as InterviewSession['studyPlan'])
+        : undefined,
+    completedDrillIds,
+  };
+}
 
 function loadSavedSessions(): InterviewSession[] {
   try {
@@ -27,10 +100,9 @@ function loadSavedSessions(): InterviewSession[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (s: InterviewSession & { isSample?: boolean }) =>
-        !s.isSample && s.id !== 'sample-senior-aiml-session'
-    );
+    return parsed
+      .map(sanitizeSession)
+      .filter((s): s is InterviewSession => s !== null);
   } catch {
     return [];
   }
@@ -113,15 +185,25 @@ export function App() {
     setIsGenerating(true);
     try {
       const { jdAnalysis, questions } = await generateInterview(config);
+      if (!Array.isArray(questions) || questions.length === 0) {
+        throw new Error(
+          'Unable to generate tailored questions right now. Please try again.'
+        );
+      }
       const now = new Date().toISOString();
       const newSession: InterviewSession = {
         id: `session-${Date.now()}`,
         createdAt: now,
         updatedAt: now,
-        roleTitle: config.roleTitle || jdAnalysis.extractedRole,
+        roleTitle: config.roleTitle || jdAnalysis?.extractedRole || 'Python / AI-ML Engineer',
         skillLevel: config.skillLevel,
         jobDescription: config.jobDescription,
-        jdAnalysis,
+        jdAnalysis: jdAnalysis ?? {
+          extractedRole: config.roleTitle || 'Python / AI-ML Engineer',
+          senioritySignals: [],
+          coreTechnologies: [],
+          interviewEmphasis: '',
+        },
         questions,
         attempts: {},
         elapsedSeconds: 0,
@@ -325,6 +407,9 @@ export function App() {
         skillLevel: activeSession.skillLevel,
         jobDescription: activeSession.jobDescription,
         performanceDigest,
+        sessionTracks: activeSession.questions.map(
+          (q) => `${q.domain}: ${q.title}`
+        ),
       });
 
       updateActiveSession((session) => ({
@@ -393,75 +478,107 @@ export function App() {
 
       <main className="flex-1">
         {activeTab === 'setup' && (
-          <SetupView
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            showWelcome={showWelcome}
-            onDismissWelcome={handleDismissWelcome}
-            onReopenWelcome={handleReopenWelcome}
-            isGenerating={isGenerating}
-            errorMessage={errorMessage}
-            onGenerateSession={handleGenerateSession}
-            onOpenSession={handleOpenSession}
-            onDeleteSession={handleDeleteSession}
-          />
+          <ErrorBoundary
+            sectionLabel="Setup Workbench"
+            onResetStorage={() => {
+              try {
+                window.localStorage.removeItem(STORAGE_KEY);
+              } catch {
+                // Ignore storage errors
+              }
+              setSessions([]);
+              setActiveSessionId(null);
+            }}
+          >
+            <SetupView
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              showWelcome={showWelcome}
+              onDismissWelcome={handleDismissWelcome}
+              onReopenWelcome={handleReopenWelcome}
+              isGenerating={isGenerating}
+              errorMessage={errorMessage}
+              onGenerateSession={handleGenerateSession}
+              onOpenSession={handleOpenSession}
+              onDeleteSession={handleDeleteSession}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'interview' && activeSession && (
-          <InterviewView
-            session={activeSession}
-            selectedQuestionId={
-              selectedQuestionId || activeSession.questions[0]?.id || ''
-            }
-            onSelectQuestion={(id) => {
-              setErrorMessage(null);
-              setSelectedQuestionId(id);
-            }}
-            onDraftChange={handleDraftChange}
-            onSubmitAnswer={handleSubmitAnswer}
-            onSkipQuestion={handleSkipQuestion}
-            onSubmitFollowUp={handleSubmitFollowUp}
-            onTickTimer={handleTickTimer}
-            onFinishSession={() => {
-              setErrorMessage(null);
-              setActiveTab('evaluation');
-            }}
-            isEvaluating={isEvaluating}
-            isEvaluatingFollowUp={isEvaluatingFollowUp}
-            errorMessage={errorMessage}
-          />
+          <ErrorBoundary
+            sectionLabel="Mock Interview"
+            onResetStorage={() => setActiveTab('setup')}
+          >
+            <InterviewView
+              session={activeSession}
+              selectedQuestionId={
+                selectedQuestionId || activeSession.questions[0]?.id || ''
+              }
+              onSelectQuestion={(id) => {
+                setErrorMessage(null);
+                setSelectedQuestionId(id);
+              }}
+              onDraftChange={handleDraftChange}
+              onSubmitAnswer={handleSubmitAnswer}
+              onSkipQuestion={handleSkipQuestion}
+              onSubmitFollowUp={handleSubmitFollowUp}
+              onTickTimer={handleTickTimer}
+              onFinishSession={() => {
+                setErrorMessage(null);
+                setActiveTab('evaluation');
+              }}
+              isEvaluating={isEvaluating}
+              isEvaluatingFollowUp={isEvaluatingFollowUp}
+              errorMessage={errorMessage}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'evaluation' && activeSession && (
-          <EvaluationView
-            session={activeSession}
-            isGeneratingPlan={isGeneratingPlan}
-            errorMessage={errorMessage}
-            onGenerateStudyPlan={handleGenerateStudyPlan}
-            onOpenStudyPlan={() => {
-              setErrorMessage(null);
-              setActiveTab('study-plan');
-            }}
-            onJumpToQuestion={(qId) => {
-              setErrorMessage(null);
-              setSelectedQuestionId(qId);
-              setActiveTab('interview');
-            }}
-          />
+          <ErrorBoundary
+            sectionLabel="Evaluation"
+            onResetStorage={() => setActiveTab('setup')}
+          >
+            <EvaluationView
+              session={activeSession}
+              isGeneratingPlan={isGeneratingPlan}
+              errorMessage={errorMessage}
+              onGenerateStudyPlan={handleGenerateStudyPlan}
+              onOpenStudyPlan={() => {
+                setErrorMessage(null);
+                setActiveTab('study-plan');
+              }}
+              onJumpToQuestion={(qId) => {
+                setErrorMessage(null);
+                setSelectedQuestionId(qId);
+                setActiveTab('interview');
+              }}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'study-plan' && activeSession && (
-          <StudyPlanView
-            session={activeSession}
-            isGeneratingPlan={isGeneratingPlan}
-            errorMessage={errorMessage}
-            onGenerateStudyPlan={handleGenerateStudyPlan}
-            onToggleDrill={handleToggleDrill}
-            onStartNewSession={() => {
-              setErrorMessage(null);
-              setActiveTab('setup');
-            }}
-          />
+          <ErrorBoundary
+            sectionLabel="Study Plan"
+            onResetStorage={() => setActiveTab('setup')}
+          >
+            <StudyPlanView
+              session={activeSession}
+              isGeneratingPlan={isGeneratingPlan}
+              errorMessage={errorMessage}
+              onGenerateStudyPlan={handleGenerateStudyPlan}
+              onToggleDrill={handleToggleDrill}
+              onGoToInterview={() => {
+                setErrorMessage(null);
+                setActiveTab('interview');
+              }}
+              onStartNewSession={() => {
+                setErrorMessage(null);
+                setActiveTab('setup');
+              }}
+            />
+          </ErrorBoundary>
         )}
       </main>
 

@@ -20,8 +20,8 @@ const TRACE_NODES: TraceNode[] = [
   { id: 'dsa', label: 'DSA', rx: 0.7, ry: 0.74 },
 ];
 
-const SEGMENT_COUNT = 42;
-const SEGMENT_LENGTH = 7.4;
+const SEGMENT_COUNT = 48;
+const SEGMENT_LENGTH = 6.8;
 
 function normalizeAngle(angle: number): number {
   let a = angle;
@@ -31,16 +31,19 @@ function normalizeAngle(angle: number): number {
 }
 
 function getSegmentRadius(index: number, total: number): number {
-  const t = index / (total - 1);
+  const t = total > 1 ? index / (total - 1) : 0;
   if (t < 0.08) {
-    return 6.8 + t * 22;
+    // Sleek neck behind the angular head
+    return 4.6 + (t / 0.08) * 1.4;
   }
-  if (t < 0.55) {
-    const mid = (t - 0.08) / 0.47;
-    return 8.5 + Math.sin(mid * Math.PI) * 3.4;
+  if (t < 0.46) {
+    // Lean, muscular mid-body swell
+    const mid = (t - 0.08) / 0.38;
+    return 6.0 + Math.sin(mid * Math.PI) * 2.1;
   }
-  const tail = (t - 0.55) / 0.45;
-  return Math.max(1.3, 8.5 * Math.pow(1 - tail, 1.35));
+  // Long, continuous taper down to a sharp tail tip
+  const tail = (t - 0.46) / 0.54;
+  return Math.max(0, 6.0 * Math.pow(Math.max(0, 1 - tail), 1.85));
 }
 
 function buildInitialSpine(width: number, height: number): SpineSegment[] {
@@ -109,7 +112,11 @@ export const InteractivePythonHero: React.FC = () => {
       stateRef.current.width = width;
       stateRef.current.height = height;
 
-      if (Math.abs(prevW - width) > 20 || Math.abs(prevH - height) > 20) {
+      if (
+        prevW > 0 &&
+        prevH > 0 &&
+        (Math.abs(prevW - width) > 20 || Math.abs(prevH - height) > 20)
+      ) {
         const sx = width / prevW;
         const sy = height / prevH;
         stateRef.current.segments = stateRef.current.segments.map((seg) => ({
@@ -120,8 +127,9 @@ export const InteractivePythonHero: React.FC = () => {
     };
 
     resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(container);
+    const observer =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
+    observer?.observe(container);
 
     let rafId = 0;
     let lastTs = performance.now();
@@ -295,7 +303,7 @@ export const InteractivePythonHero: React.FC = () => {
         const leftPts: SpineSegment[] = [];
         const rightPts: SpineSegment[] = [];
 
-        for (let i = 0; i < s.segments.length; i++) {
+        for (let i = 0; i < s.segments.length - 1; i++) {
           const curr = s.segments[i];
           const prev = s.segments[Math.max(0, i - 1)];
           const next = s.segments[Math.min(s.segments.length - 1, i + 1)];
@@ -310,68 +318,85 @@ export const InteractivePythonHero: React.FC = () => {
           rightPts.push({ x: curr.x - nx * radius, y: curr.y - ny * radius });
         }
 
+        // Extend final vertex slightly along tail direction for a crisp pointed tip
+        const tailEnd = s.segments[s.segments.length - 1];
+        const tailPrev = s.segments[s.segments.length - 2];
+        const tailDx = tailEnd.x - tailPrev.x;
+        const tailDy = tailEnd.y - tailPrev.y;
+        const tailLen = Math.hypot(tailDx, tailDy) || 1;
+        const tailTip: SpineSegment = {
+          x: tailEnd.x + (tailDx / tailLen) * 5,
+          y: tailEnd.y + (tailDy / tailLen) * 5,
+        };
+
+        const traceBodyPath = () => {
+          if (leftPts.length < 2 || rightPts.length < 2) return;
+          ctx.beginPath();
+          ctx.moveTo(leftPts[0].x, leftPts[0].y);
+          for (let i = 1; i < leftPts.length - 1; i++) {
+            const xc = (leftPts[i].x + leftPts[i + 1].x) * 0.5;
+            const yc = (leftPts[i].y + leftPts[i + 1].y) * 0.5;
+            ctx.quadraticCurveTo(leftPts[i].x, leftPts[i].y, xc, yc);
+          }
+          ctx.lineTo(tailTip.x, tailTip.y);
+          for (let i = rightPts.length - 1; i > 0; i--) {
+            const xc = (rightPts[i].x + rightPts[i - 1].x) * 0.5;
+            const yc = (rightPts[i].y + rightPts[i - 1].y) * 0.5;
+            ctx.quadraticCurveTo(rightPts[i].x, rightPts[i].y, xc, yc);
+          }
+          ctx.lineTo(rightPts[0].x, rightPts[0].y);
+          ctx.closePath();
+        };
+
         // Soft ground shadow
         ctx.save();
         ctx.translate(3, 5);
-        ctx.beginPath();
-        ctx.moveTo(leftPts[0].x, leftPts[0].y);
-        for (let i = 1; i < leftPts.length; i++) {
-          ctx.lineTo(leftPts[i].x, leftPts[i].y);
-        }
-        for (let i = rightPts.length - 1; i >= 0; i--) {
-          ctx.lineTo(rightPts[i].x, rightPts[i].y);
-        }
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.09)';
+        traceBodyPath();
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.08)';
         ctx.fill();
         ctx.restore();
 
         // Main python body silhouette
-        ctx.beginPath();
-        ctx.moveTo(leftPts[0].x, leftPts[0].y);
-        for (let i = 1; i < leftPts.length; i++) {
-          ctx.lineTo(leftPts[i].x, leftPts[i].y);
-        }
-        for (let i = rightPts.length - 1; i >= 0; i--) {
-          ctx.lineTo(rightPts[i].x, rightPts[i].y);
-        }
-        ctx.closePath();
+        traceBodyPath();
         ctx.fillStyle = '#1E293B';
         ctx.fill();
         ctx.strokeStyle = '#0F172A';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 0.95;
+        ctx.lineJoin = 'round';
         ctx.stroke();
 
         // Dorsal saddle markings & scale highlights
-        for (let i = 2; i < s.segments.length - 3; i++) {
+        for (let i = 2; i < s.segments.length - 6; i++) {
           const curr = s.segments[i];
           const prev = s.segments[i - 1];
           const angle = Math.atan2(prev.y - curr.y, prev.x - curr.x);
           const r = getSegmentRadius(i, s.segments.length);
 
-          if (i % 3 === 0) {
+          if (i % 3 === 0 && r > 1.8) {
             ctx.save();
             ctx.translate(curr.x, curr.y);
             ctx.rotate(angle);
             ctx.beginPath();
-            ctx.ellipse(0, 0, SEGMENT_LENGTH * 0.9, r * 0.72, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, SEGMENT_LENGTH * 0.8, r * 0.68, 0, 0, Math.PI * 2);
             ctx.fillStyle = i % 6 === 0 ? '#1D4ED8' : '#334155';
             ctx.globalAlpha = i % 6 === 0 ? 0.55 : 0.75;
             ctx.fill();
             ctx.restore();
           }
 
-          ctx.save();
-          ctx.translate(curr.x, curr.y);
-          ctx.rotate(angle);
-          ctx.beginPath();
-          ctx.moveTo(-2, -r * 0.45);
-          ctx.lineTo(2.4, 0);
-          ctx.lineTo(-2, r * 0.45);
-          ctx.strokeStyle = 'rgba(248, 250, 252, 0.16)';
-          ctx.lineWidth = 0.85;
-          ctx.stroke();
-          ctx.restore();
+          if (r > 1.4) {
+            ctx.save();
+            ctx.translate(curr.x, curr.y);
+            ctx.rotate(angle);
+            ctx.beginPath();
+            ctx.moveTo(-1.8, -r * 0.42);
+            ctx.lineTo(2.0, 0);
+            ctx.lineTo(-1.8, r * 0.42);
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.16)';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+            ctx.restore();
+          }
         }
 
         // Forked tongue animation
@@ -453,7 +478,7 @@ export const InteractivePythonHero: React.FC = () => {
     rafId = window.requestAnimationFrame(stepAndDraw);
     return () => {
       window.cancelAnimationFrame(rafId);
-      observer.disconnect();
+      observer?.disconnect();
     };
   }, []);
 

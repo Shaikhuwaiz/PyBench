@@ -13,6 +13,7 @@ interface StudyPlanViewProps {
   errorMessage: string | null;
   onGenerateStudyPlan: () => Promise<void>;
   onToggleDrill: (drillId: string) => void;
+  onGoToInterview: () => void;
   onStartNewSession: () => void;
 }
 
@@ -22,10 +23,12 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
   errorMessage,
   onGenerateStudyPlan,
   onToggleDrill,
+  onGoToInterview,
   onStartNewSession,
 }) => {
   const plan = session.studyPlan;
   const metrics = computeSessionMetrics(session);
+  const hasEvaluations = metrics.evaluatedCount + metrics.skippedCount > 0;
 
   const handleExportMarkdown = () => {
     const md = buildStudyPlanMarkdown(session);
@@ -49,10 +52,12 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
       <div className="max-w-[1360px] mx-auto px-6 py-16">
         <div className="max-w-xl mx-auto bg-white border border-slate-200 rounded-xl p-8 text-center space-y-5">
           <h1 className="text-2xl font-bold text-slate-950">
-            No Weak-Area Study Plan Generated Yet
+            No Study Plan Generated Yet
           </h1>
           <p className="text-sm text-slate-600 leading-relaxed">
-            Evaluate at least one mock interview question, then generate a prioritized study plan with hands-on drills and a 7-day preparation schedule tailored to your gaps.
+            {hasEvaluations
+              ? 'Your evaluated interview answers are ready. Generate a prioritized weak-area study plan with hands-on drills and a 7-day preparation schedule.'
+              : 'Answer at least one mock interview question first for a gap-diagnosed plan, or generate a baseline preparation plan right now from your target job description.'}
           </p>
           {errorMessage && (
             <div
@@ -62,27 +67,47 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
               {errorMessage}
             </div>
           )}
-          <div className="flex items-center justify-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <button
               type="button"
-              disabled={
-                isGeneratingPlan ||
-                metrics.evaluatedCount + metrics.skippedCount === 0
-              }
+              disabled={isGeneratingPlan}
               onClick={onGenerateStudyPlan}
               className="px-5 py-2.5 text-sm font-medium text-white bg-blue-700 hover:bg-blue-800 disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap"
             >
               {isGeneratingPlan
                 ? 'Synthesizing Study Plan...'
-                : 'Generate Weak-Area Study Plan'}
+                : hasEvaluations
+                ? 'Generate Weak-Area Study Plan'
+                : 'Generate Baseline Study Plan'}
             </button>
+            {!hasEvaluations && (
+              <button
+                type="button"
+                onClick={onGoToInterview}
+                className="px-4 py-2.5 text-sm font-medium text-slate-700 hover:text-slate-950 bg-slate-100 hover:bg-slate-200/80 rounded-lg transition-colors whitespace-nowrap"
+              >
+                Answer Questions First
+              </button>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
-  const allDrills = plan.priorityWeakAreas.flatMap((wa) => wa.drills);
+  const weakAreas = Array.isArray(plan.priorityWeakAreas)
+    ? plan.priorityWeakAreas
+    : [];
+  const weeklySchedule = Array.isArray(plan.weeklySchedule)
+    ? plan.weeklySchedule
+    : [];
+  const commonMistakes = Array.isArray(plan.commonMistakesToEliminate)
+    ? plan.commonMistakesToEliminate
+    : [];
+
+  const allDrills = weakAreas.flatMap((wa) =>
+    Array.isArray(wa.drills) ? wa.drills : []
+  );
   const completedCount = allDrills.filter((d) =>
     session.completedDrillIds.includes(d.id)
   ).length;
@@ -178,7 +203,7 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
         </h2>
 
         <div className="space-y-6">
-          {plan.priorityWeakAreas.map((area, idx) => {
+          {weakAreas.map((area, idx) => {
             const sev = getSeverityStyle(area.severity);
             return (
               <article
@@ -232,7 +257,7 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
                     Required Drills
                   </div>
                   <div className="divide-y divide-slate-100">
-                    {area.drills.map((drill) => {
+                    {(Array.isArray(area.drills) ? area.drills : []).map((drill) => {
                       const checked = session.completedDrillIds.includes(
                         drill.id
                       );
@@ -312,7 +337,7 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {plan.weeklySchedule.map((day, idx) => (
+              {weeklySchedule.map((day, idx) => (
                 <tr key={idx} className="align-top hover:bg-slate-50/70">
                   <td className="py-4 px-5 font-mono tabular-nums font-semibold text-slate-950 whitespace-nowrap">
                     {day.dayLabel}
@@ -348,7 +373,7 @@ export const StudyPlanView: React.FC<StudyPlanViewProps> = ({
             03. Recurring Mistakes to Eliminate
           </h2>
           <ul className="space-y-2 text-sm text-slate-700 list-disc pl-4">
-            {plan.commonMistakesToEliminate.map((item, idx) => (
+            {commonMistakes.map((item, idx) => (
               <li key={idx} className="leading-relaxed">
                 {item}
               </li>

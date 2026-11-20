@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, Minus, Plus, Trash2, X } from 'lucide-react';
 import { JD_PRESETS } from '../data/presets';
+import { InteractivePythonHero } from './InteractivePythonHero';
 import {
   ALL_DOMAINS,
   SKILL_LEVELS,
@@ -98,6 +99,36 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   return (
     <div className="max-w-[1360px] mx-auto px-6 py-10 space-y-10">
+      {/* Opening Split Hero: Editorial Headline + Genuine Interactive Python Specimen */}
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+        <div className="lg:col-span-6 space-y-4">
+          <p className="text-sm font-medium text-blue-700">
+            Python & AI/ML Technical Interview Calibration
+          </p>
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-950 leading-tight">
+            Turn any target job description into a calibrated mock interview and study plan.
+          </h1>
+          <p className="text-base text-slate-600 leading-relaxed">
+            Configure your role requirements, target seniority bar, and five-track question allocation below to launch a timed written session graded against a senior engineering rubric.
+          </p>
+          {!showWelcome && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={onReopenWelcome}
+                className="text-xs font-medium text-slate-500 hover:text-slate-900 underline underline-offset-4 whitespace-nowrap"
+              >
+                Show quick-start guide
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="lg:col-span-6">
+          <InteractivePythonHero />
+        </div>
+      </section>
+
       {/* First-Time Welcome Guide */}
       {showWelcome && (
         <section
@@ -172,31 +203,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
           </div>
         </section>
       )}
-
-      {/* Intro Header */}
-      <section className="flex flex-wrap items-end justify-between gap-4">
-        <div className="max-w-3xl space-y-2.5">
-          <p className="text-sm font-medium text-blue-700">
-            Python & AI/ML Technical Interview Calibration
-          </p>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-950 leading-tight">
-            Turn any target job description into a calibrated mock interview and study plan.
-          </h1>
-          <p className="text-base text-slate-600 leading-relaxed">
-            Configure your role requirements, target seniority bar, and five-track question allocation below to launch a timed written session.
-          </p>
-        </div>
-
-        {!showWelcome && (
-          <button
-            type="button"
-            onClick={onReopenWelcome}
-            className="text-xs font-medium text-slate-500 hover:text-slate-900 underline underline-offset-4 whitespace-nowrap shrink-0"
-          >
-            Show quick-start guide
-          </button>
-        )}
-      </section>
 
       {/* Main 2-Column Configuration Workbench */}
       <form

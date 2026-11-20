@@ -1,0 +1,6 @@
+{
+  "name": "PyBench — Python & AI/ML Interview Workbench",
+  "description": "Role-specific technical mock interviews, rubric-based written answer evaluation, and systematic weak-area study plans for Python and AI/ML engineers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
